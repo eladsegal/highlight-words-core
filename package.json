@@ -12,7 +12,8 @@
     "lint": "standard",
     "prebuild": "rimraf dist",
     "prepublish": "npm run build",
-    "test": "mocha --compilers js:babel-register \"src/**/*.test.js\""
+    "test": "mocha --compilers js:babel-register \"src/**/*.test.js\"",
+    "prepare": "npm run build"
   },
   "files": [
     "dist",

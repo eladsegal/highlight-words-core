@@ -4,6 +4,7 @@ export type Chunk = {|
   highlight: boolean,
   start: number,
   end: number,
+  searchWordsIndexes?: Array<number>
 |};
 
 /**
@@ -16,7 +17,8 @@ export const findAll = ({
   findChunks = defaultFindChunks,
   sanitize,
   searchWords,
-  textToHighlight
+  textToHighlight,
+  splitIntersectingChunks
 }: {
   autoEscape?: boolean,
   caseSensitive?: boolean,
@@ -24,6 +26,7 @@ export const findAll = ({
   sanitize?: typeof defaultSanitize,
   searchWords: Array<string>,
   textToHighlight: string,
+  splitIntersectingChunks?: boolean
 }): Array<Chunk> => (
   fillInChunks({
     chunksToHighlight: combineChunks({
@@ -32,8 +35,10 @@ export const findAll = ({
         caseSensitive,
         sanitize,
         searchWords,
-        textToHighlight
-      })
+        textToHighlight,
+        splitIntersectingChunks
+      }),
+      splitIntersectingChunks
     }),
     totalLength: textToHighlight ? textToHighlight.length : 0
   })
@@ -44,31 +49,69 @@ export const findAll = ({
  * @return {start:number, end:number}[]
  */
 export const combineChunks = ({
-  chunks
+  chunks,
+  splitIntersectingChunks
 }: {
   chunks: Array<Chunk>,
+  splitIntersectingChunks?: boolean
 }): Array<Chunk> => {
-  chunks = chunks
-    .sort((first, second) => first.start - second.start)
-    .reduce((processedChunks, nextChunk) => {
-      // First chunk just goes straight in the array...
-      if (processedChunks.length === 0) {
-        return [nextChunk]
-      } else {
-        // ... subsequent chunks get checked to see if they overlap...
-        const prevChunk = processedChunks.pop()
-        if (nextChunk.start <= prevChunk.end) {
-          // It may be the case that prevChunk completely surrounds nextChunk, so take the
-          // largest of the end indeces.
-          const endIndex = Math.max(prevChunk.end, nextChunk.end)
-          processedChunks.push({highlight: false, start: prevChunk.start, end: endIndex})
+  if (!splitIntersectingChunks) {
+    chunks = chunks
+      .sort((first, second) => first.start - second.start)
+      .reduce((processedChunks, nextChunk) => {
+        // First chunk just goes straight in the array...
+        if (processedChunks.length === 0) {
+          return [nextChunk]
         } else {
-          processedChunks.push(prevChunk, nextChunk)
+          // ... subsequent chunks get checked to see if they overlap...
+          const prevChunk = processedChunks.pop()
+          if (nextChunk.start <= prevChunk.end) {
+            // It may be the case that prevChunk completely surrounds nextChunk, so take the
+            // largest of the end indeces.
+            const endIndex = Math.max(prevChunk.end, nextChunk.end)
+            processedChunks.push({highlight: false, start: prevChunk.start, end: endIndex})
+          } else {
+            processedChunks.push(prevChunk, nextChunk)
+          }
+          return processedChunks
         }
-        return processedChunks
-      }
-    }, [])
+      }, [])
+  } else {
+    const positions = ['start', 'end']
+    const mappings = {}
+    chunks.forEach((chunk) => {
+      positions.forEach((position) => {
+        mappings[chunk[position]] = mappings[chunk[position]] ? mappings[chunk[position]] : []
 
+        if (chunk.searchWordsIndexes) {
+          mappings[chunk[position]].push(`${chunk.searchWordsIndexes[0]}_${position}`)
+        }
+      })      
+    })
+
+    const intervalBoundaries = Object.keys(mappings).map(key => parseInt(key)).sort((firstKey, secondKey) => firstKey - secondKey)
+    chunks = []
+    let activeSearchWordsIndexes = []
+    const activeIndexIndicatorToInteger = value => parseInt(value.substring(0, value.indexOf('_')))
+    for (let i=0; i < intervalBoundaries.length - 1; i++) {
+      const start = intervalBoundaries[i]
+      const end = intervalBoundaries[i + 1]
+
+      mappings[start]
+        .filter(value => value.includes('end'))
+        .map(activeIndexIndicatorToInteger)
+        .forEach((searchWordIndex) => {
+          const indexToRemove = activeSearchWordsIndexes.indexOf(searchWordIndex)
+          activeSearchWordsIndexes.splice(indexToRemove, 1)
+        })
+
+      activeSearchWordsIndexes = activeSearchWordsIndexes
+        .concat(mappings[start].filter(value => value.includes('start')).map(activeIndexIndicatorToInteger))
+        .sort()
+
+      chunks.push({highlight: false, start: start, end: end, searchWordsIndexes: [...activeSearchWordsIndexes]})
+    }
+  }
   return chunks
 }
 
@@ -82,19 +125,21 @@ const defaultFindChunks = ({
   caseSensitive,
   sanitize = defaultSanitize,
   searchWords,
-  textToHighlight
+  textToHighlight,
+  splitIntersectingChunks
 }: {
   autoEscape?: boolean,
   caseSensitive?: boolean,
   sanitize?: typeof defaultSanitize,
   searchWords: Array<string>,
   textToHighlight: string,
+  splitIntersectingChunks?: boolean
 }): Array<Chunk> => {
   textToHighlight = sanitize(textToHighlight)
 
   return searchWords
     .filter(searchWord => searchWord) // Remove empty words
-    .reduce((chunks, searchWord) => {
+    .reduce((chunks, searchWord, searchWordIndex) => {
       searchWord = sanitize(searchWord)
 
       if (autoEscape) {
@@ -109,7 +154,11 @@ const defaultFindChunks = ({
         let end = regex.lastIndex
         // We do not return zero-length matches
         if (end > start) {
-          chunks.push({highlight: false, start, end})
+          const chunk = {highlight: false, start, end}
+          if (splitIntersectingChunks) {
+            chunk.searchWordsIndexes = [searchWordIndex]
+          }
+          chunks.push(chunk)
         }
 
         // Prevent browsers like Firefox from getting stuck in an infinite loop
@@ -141,13 +190,17 @@ export const fillInChunks = ({
   totalLength: number,
 }): Array<Chunk> => {
   const allChunks = []
-  const append = (start, end, highlight) => {
+  const append = (start, end, highlight, searchWordsIndexes) => {
     if (end - start > 0) {
-      allChunks.push({
+      const chunk = {
         start,
         end,
         highlight
-      })
+      }
+      if (searchWordsIndexes) {
+        chunk.searchWordsIndexes = searchWordsIndexes
+      }
+      allChunks.push(chunk)
     }
   }
 
@@ -157,7 +210,7 @@ export const fillInChunks = ({
     let lastIndex = 0
     chunksToHighlight.forEach((chunk) => {
       append(lastIndex, chunk.start, false)
-      append(chunk.start, chunk.end, true)
+      append(chunk.start, chunk.end, true, chunk.searchWordsIndexes)
       lastIndex = chunk.end
     })
     append(lastIndex, totalLength, false)
