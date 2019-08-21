@@ -59,14 +59,16 @@ describe('utils', () => {
   it('should combine into the maximum number of marked and unmarked chunks', () => {
     const filledInChunks = Chunks.findAll({
       searchWords: ['Tom', 'om Joh', 'Tom'],
-      textToHighlight: 'Tom Johnson',
+      textToHighlight: 'Tom Johnson Tom test',
       splitIntersectingChunks: true 
     })
     expect(filledInChunks).to.eql([
       {start: 0, end: 1, highlight: true, searchWordsIndexes: [0, 2]},
       {start: 1, end: 3, highlight: true, searchWordsIndexes: [0, 1, 2]},
       {start: 3, end: 7, highlight: true, searchWordsIndexes: [1]},
-      {start: 7, end: 11, highlight: false}
+      {start: 7, end: 12, highlight: false},
+      {start: 12, end: 15, highlight: true, searchWordsIndexes: [0, 2]},
+      {start: 15, end: 20, highlight: false},
     ])
   })
 

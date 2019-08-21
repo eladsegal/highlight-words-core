@@ -109,7 +109,9 @@ export const combineChunks = ({
         .concat(mappings[start].filter(value => value.includes('start')).map(activeIndexIndicatorToInteger))
         .sort()
 
-      chunks.push({highlight: false, start: start, end: end, searchWordsIndexes: [...activeSearchWordsIndexes]})
+      if (activeSearchWordsIndexes.length > 0) {
+        chunks.push({highlight: false, start: start, end: end, searchWordsIndexes: [...activeSearchWordsIndexes]});
+      }
     }
   }
   return chunks
