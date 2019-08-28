@@ -72,6 +72,47 @@ describe('utils', () => {
     ])
   })
 
+
+  it('should combine into the maximum number of marked and unmarked chunks, with spans considred', () => {
+    const filledInChunks = Chunks.findAll({
+      searchWords: ['Tom', 'om Joh', 'Tom'],
+      textToHighlight: 'Tom Johnson Tom test',
+      spans: [[0, 1], [16, 17], [4,8]],
+      splitIntersectingChunks: true 
+    })
+    expect(filledInChunks).to.eql([
+      {start: 0, end: 1, highlight: true, searchWordsIndexes: [0, 2], spansIndexes: [0]},
+      {start: 1, end: 3, highlight: true, searchWordsIndexes: [0, 1, 2]},
+      {start: 3, end: 4, highlight: true, searchWordsIndexes: [1]},
+      {start: 4, end: 7, highlight: true, searchWordsIndexes: [1], spansIndexes: [2]},
+      {start: 7, end: 8, highlight: true, spansIndexes: [2]},
+      {start: 8, end: 12, highlight: false},
+      {start: 12, end: 15, highlight: true, searchWordsIndexes: [0, 2]},
+      {start: 15, end: 16, highlight: false},
+      {start: 16, end: 17, highlight: true, spansIndexes: [1]},
+      {start: 17, end: 20, highlight: false},
+    ])
+  })
+
+  it('should combine into the maximum number of marked and unmarked chunks, with only spans', () => {
+    const filledInChunks = Chunks.findAll({
+      searchWords: [],
+      textToHighlight: 'Tom Johnson Tom test',
+      spans: [[0, 1], [3,7], [5,9], [16, 17]],
+      splitIntersectingChunks: true 
+    })
+    expect(filledInChunks).to.eql([
+      {start: 0, end: 1, highlight: true, spansIndexes: [0]},
+      {start: 1, end: 3, highlight: false},
+      {start: 3, end: 5, highlight: true, spansIndexes: [1]},
+      {start: 5, end: 7, highlight: true, spansIndexes: [1, 2]},
+      {start: 7, end: 9, highlight: true, spansIndexes: [2]},
+      {start: 9, end: 16, highlight: false},
+      {start: 16, end: 17, highlight: true, spansIndexes: [3]},
+      {start: 17, end: 20, highlight: false},
+    ])
+  })
+
   it('should handle unclosed parentheses when autoEscape prop is truthy', () => {
     const rawChunks = Chunks.findChunks({
       autoEscape: true,

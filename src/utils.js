@@ -4,7 +4,8 @@ export type Chunk = {|
   highlight: boolean,
   start: number,
   end: number,
-  searchWordsIndexes?: Array<number>
+  searchWordsIndexes?: Array<number>,
+  spansIndexes?: Array<number>
 |};
 
 /**
@@ -18,6 +19,7 @@ export const findAll = ({
   sanitize,
   searchWords,
   textToHighlight,
+  spans,
   splitIntersectingChunks
 }: {
   autoEscape?: boolean,
@@ -26,6 +28,7 @@ export const findAll = ({
   sanitize?: typeof defaultSanitize,
   searchWords: Array<string>,
   textToHighlight: string,
+  spans?: Array<[number, number]>,
   splitIntersectingChunks?: boolean
 }): Array<Chunk> => (
   fillInChunks({
@@ -36,6 +39,7 @@ export const findAll = ({
         sanitize,
         searchWords,
         textToHighlight,
+        spans,
         splitIntersectingChunks
       }),
       splitIntersectingChunks
@@ -84,7 +88,10 @@ export const combineChunks = ({
         mappings[chunk[position]] = mappings[chunk[position]] ? mappings[chunk[position]] : []
 
         if (chunk.searchWordsIndexes) {
-          mappings[chunk[position]].push(`${chunk.searchWordsIndexes[0]}_${position}`)
+          mappings[chunk[position]].push({position, searchWordIndex: chunk.searchWordsIndexes[0]})
+        }
+        if (chunk.spansIndexes) {
+          mappings[chunk[position]].push({position, spanIndex: chunk.spansIndexes[0]})
         }
       })      
     })
@@ -92,25 +99,41 @@ export const combineChunks = ({
     const intervalBoundaries = Object.keys(mappings).map(key => parseInt(key)).sort((firstKey, secondKey) => firstKey - secondKey)
     chunks = []
     let activeSearchWordsIndexes = []
-    const activeIndexIndicatorToInteger = value => parseInt(value.substring(0, value.indexOf('_')))
+    let activeSpansIndexes = []
     for (let i=0; i < intervalBoundaries.length - 1; i++) {
       const start = intervalBoundaries[i]
       const end = intervalBoundaries[i + 1]
 
       mappings[start]
-        .filter(value => value.includes('end'))
-        .map(activeIndexIndicatorToInteger)
-        .forEach((searchWordIndex) => {
-          const indexToRemove = activeSearchWordsIndexes.indexOf(searchWordIndex)
-          activeSearchWordsIndexes.splice(indexToRemove, 1)
+        .filter(value => value.position === 'end')
+        .forEach((value) => {
+          if (value.searchWordIndex !== undefined) {
+            const indexToRemove = activeSearchWordsIndexes.indexOf(value.searchWordIndex)
+            activeSearchWordsIndexes.splice(indexToRemove, 1)
+          } 
+          if (value.spanIndex !== undefined) {
+            const indexToRemove = activeSpansIndexes.indexOf(value.spanIndex)
+            activeSpansIndexes.splice(indexToRemove, 1)
+          } 
         })
 
       activeSearchWordsIndexes = activeSearchWordsIndexes
-        .concat(mappings[start].filter(value => value.includes('start')).map(activeIndexIndicatorToInteger))
+        .concat(mappings[start].filter(value => value.searchWordIndex !== undefined && value.position === 'start').map(value => value.searchWordIndex))
         .sort()
 
+      activeSpansIndexes = activeSpansIndexes
+        .concat(mappings[start].filter(value => value.spanIndex !== undefined && value.position === 'start').map(value => value.spanIndex))
+        .sort()
+
+      const splitChunk = {highlight: false, start: start, end: end}
       if (activeSearchWordsIndexes.length > 0) {
-        chunks.push({highlight: false, start: start, end: end, searchWordsIndexes: [...activeSearchWordsIndexes]});
+        splitChunk.searchWordsIndexes = [...activeSearchWordsIndexes]
+      }
+      if (activeSpansIndexes.length > 0) {
+        splitChunk.spansIndexes = [...activeSpansIndexes]
+      }
+      if (activeSearchWordsIndexes.length > 0 || activeSpansIndexes.length > 0) {
+        chunks.push(splitChunk)
       }
     }
   }
@@ -128,6 +151,7 @@ const defaultFindChunks = ({
   sanitize = defaultSanitize,
   searchWords,
   textToHighlight,
+  spans,
   splitIntersectingChunks
 }: {
   autoEscape?: boolean,
@@ -135,11 +159,12 @@ const defaultFindChunks = ({
   sanitize?: typeof defaultSanitize,
   searchWords: Array<string>,
   textToHighlight: string,
+  spans?: Array<[number, number]>,
   splitIntersectingChunks?: boolean
 }): Array<Chunk> => {
   textToHighlight = sanitize(textToHighlight)
 
-  return searchWords
+  const searchWordsChunks = searchWords
     .filter(searchWord => searchWord) // Remove empty words
     .reduce((chunks, searchWord, searchWordIndex) => {
       searchWord = sanitize(searchWord)
@@ -169,9 +194,18 @@ const defaultFindChunks = ({
           regex.lastIndex++
         }
       }
-
       return chunks
     }, [])
+
+    const spansChunks = []
+    if (splitIntersectingChunks && spans) {
+      spans.forEach((span, spanIndex) => {
+        const chunk = {highlight: false, start: span[0], end: span[1], spansIndexes: [spanIndex]}
+        spansChunks.push(chunk)
+      })
+    }
+
+    return [...searchWordsChunks, ...spansChunks]
 }
 // Allow the findChunks to be overridden in findAll,
 // but for backwards compatibility we export as the old name
@@ -192,7 +226,7 @@ export const fillInChunks = ({
   totalLength: number,
 }): Array<Chunk> => {
   const allChunks = []
-  const append = (start, end, highlight, searchWordsIndexes) => {
+  const append = (start, end, highlight, searchWordsIndexes, spansIndexes) => {
     if (end - start > 0) {
       const chunk = {
         start,
@@ -201,6 +235,9 @@ export const fillInChunks = ({
       }
       if (searchWordsIndexes) {
         chunk.searchWordsIndexes = searchWordsIndexes
+      }
+      if (spansIndexes && spansIndexes.length > 0) {
+        chunk.spansIndexes = spansIndexes
       }
       allChunks.push(chunk)
     }
@@ -212,7 +249,7 @@ export const fillInChunks = ({
     let lastIndex = 0
     chunksToHighlight.forEach((chunk) => {
       append(lastIndex, chunk.start, false)
-      append(chunk.start, chunk.end, true, chunk.searchWordsIndexes)
+      append(chunk.start, chunk.end, true, chunk.searchWordsIndexes, chunk.spansIndexes)
       lastIndex = chunk.end
     })
     append(lastIndex, totalLength, false)
